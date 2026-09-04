@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+venv/
+.venv/
+env/
+backend/venv/
+
+# Build & Dist
+dist/
+build/
+frontend/dist/
+
+# Byte-compiled / Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment & Local settings
+.env
+.env.local
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
