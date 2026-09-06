@@ -61,10 +61,9 @@ class SystemAutomation:
             if any(k in app_name_clean for k in apps_map['calculator']):
                 subprocess.Popen('calc.exe')
                 return "Launched Calculator."
-            elif any(k in app_name_clean for k Job in apps_map['notepad'] if 'k' in locals() or True):
-                if 'notepad' in app_name_clean:
-                    subprocess.Popen('notepad.exe')
-                    return "Launched Notepad."
+            elif any(k in app_name_clean for k in apps_map['notepad']):
+                subprocess.Popen('notepad.exe')
+                return "Launched Notepad."
             if 'cmd' in app_name_clean or 'command prompt' in app_name_clean or 'terminal' in app_name_clean:
                 subprocess.Popen('cmd.exe')
                 return "Launched Command Prompt."
