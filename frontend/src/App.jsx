@@ -10,7 +10,9 @@ export default function App() {
   const [commandInput, setCommandInput] = useState('')
   const [reactorState, setReactorState] = useState('idle') // 'idle' | 'listening' | 'speaking'
   const [statusText, setStatusText] = useState('JARVIS ONLINE')
-  const [logs, setLogs] = useState([])
+  const [logs, setLogs] = useState([
+    { type: 'system', text: '[JARVIS AI Kernel v1.0.0 Online. Standing by for directives.]' }
+  ])
   const [systemStats, setSystemStats] = useState(null)
   const [voiceEnabled, setVoiceEnabled] = useState(true)
   const recognitionRef = useRef(null)
@@ -65,67 +67,65 @@ export default function App() {
   const handleVoiceListen = async () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
 
-    if (SpeechRecognition) {
-      try {
-        if (recognitionRef.current) {
-          recognitionRef.current.abort()
-        }
-
-        const recognition = new SpeechRecognition()
-        recognitionRef.current = recognition
-        recognition.continuous = false
-        recognition.interimResults = false
-        recognition.lang = 'en-US'
-
-        setReactorState('listening')
-        setStatusText('LISTENING TO AUDIO BUS...')
-        setLogs(prev => [...prev, { type: 'system', text: 'Microphone active. Speak your command now...' }])
-
-        recognition.onresult = (event) => {
-          const transcript = event.results[0][0].transcript
-          setLogs(prev => [...prev, { type: 'system', text: `Voice Detected: "${transcript}"` }])
-          handleSendCommand(transcript)
-        }
-
-        recognition.onerror = (event) => {
-          console.warn('Speech recognition status:', event.error)
-          if (event.error !== 'no-speech') {
-            setLogs(prev => [...prev, { type: 'system', text: `Voice status: ${event.error}` }])
-          }
-          setReactorState('idle')
-          setStatusText('JARVIS ONLINE')
-        }
-
-        recognition.onend = () => {
-          setReactorState('idle')
-          setStatusText('JARVIS ONLINE')
-        }
-
-        recognition.start()
-        return
-      } catch (err) {
-        console.warn('Browser SpeechRecognition error, falling back to backend:', err)
-      }
+    if (!SpeechRecognition) {
+      setLogs(prev => [...prev, { type: 'system', text: 'Browser Speech API not supported. Please use Chrome, Edge, or type commands.' }])
+      return
     }
 
-    // Fallback: Backend Python speech listener
-    setReactorState('listening')
-    setStatusText('LISTENING FOR VOICE INPUT (BACKEND)...')
-    setLogs(prev => [...prev, { type: 'system', text: 'Microphone active. Speak now...' }])
-
     try {
-      const res = await jarvisApi.voiceListen()
-      if (res.data?.heard_text) {
-        setLogs(prev => [...prev, { type: 'user', text: res.data.heard_text }])
-        if (res.data?.data?.response) {
-          setLogs(prev => [...prev, { type: 'jarvis', text: res.data.data.response }])
+      // First request microphone permission explicitly
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          await navigator.mediaDevices.getUserMedia({ audio: true })
+        } catch (permErr) {
+          setLogs(prev => [...prev, { type: 'system', text: 'Microphone access denied. Please allow microphone in your browser URL bar.' }])
+          return
         }
-      } else {
-        setLogs(prev => [...prev, { type: 'system', text: res.data?.message || 'Speech recognition ended.' }])
       }
+
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort() } catch (e) {}
+      }
+
+      const recognition = new SpeechRecognition()
+      recognitionRef.current = recognition
+      recognition.continuous = false
+      recognition.interimResults = false
+      recognition.lang = 'en-US'
+
+      setReactorState('listening')
+      setStatusText('LISTENING TO AUDIO BUS...')
+      setLogs(prev => [...prev, { type: 'system', text: 'Microphone active. Speak your command now...' }])
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript
+        setLogs(prev => [...prev, { type: 'system', text: `Voice Heard: "${transcript}"` }])
+        handleSendCommand(transcript)
+      }
+
+      recognition.onerror = (event) => {
+        console.warn('Speech recognition status:', event.error)
+        if (event.error === 'network') {
+          setLogs(prev => [
+            ...prev,
+            { type: 'system', text: 'Voice network note: Google speech recognition service was unreachable. You can also type directly in the HUD input prompt below.' }
+          ])
+        } else if (event.error !== 'no-speech') {
+          setLogs(prev => [...prev, { type: 'system', text: `Voice status: ${event.error}` }])
+        }
+        setReactorState('idle')
+        setStatusText('JARVIS ONLINE')
+      }
+
+      recognition.onend = () => {
+        setReactorState('idle')
+        setStatusText('JARVIS ONLINE')
+      }
+
+      recognition.start()
     } catch (err) {
-      setLogs(prev => [...prev, { type: 'system', text: 'Voice microphone error or API unreachable.' }])
-    } finally {
+      console.warn('Recognition start exception:', err)
+      setLogs(prev => [...prev, { type: 'system', text: 'Could not start voice recognition. Please use the text input.' }])
       setReactorState('idle')
       setStatusText('JARVIS ONLINE')
     }
@@ -172,7 +172,7 @@ export default function App() {
               onClick={handleVoiceListen}
             >
               <Mic size={18} style={{ marginRight: '8px', verticalAlign: 'middle' }} />
-              {reactorState === 'listening' ? 'Listening...' : 'Activate Voice Command'}
+              {reactorState === 'listening' ? 'Listening to Mic...' : 'Activate Voice Command'}
             </button>
 
             <form
@@ -183,7 +183,7 @@ export default function App() {
               <input
                 type="text"
                 className="hud-input"
-                placeholder="Type command (e.g. 'open chrome', 'system stats', 'weather')..."
+                placeholder="Type command (e.g. 'weather in tokyo', 'open chrome', 'system stats')..."
                 value={commandInput}
                 onChange={(e) => setCommandInput(e.target.value)}
               />
