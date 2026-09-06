@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Mic, MicOff, Send, Cpu, Volume2, ShieldCheck, Zap } from 'lucide-react'
 import ArcReactor from './components/ArcReactor'
 import Terminal from './components/Terminal'
@@ -13,6 +13,7 @@ export default function App() {
   const [logs, setLogs] = useState([])
   const [systemStats, setSystemStats] = useState(null)
   const [voiceEnabled, setVoiceEnabled] = useState(true)
+  const recognitionRef = useRef(null)
 
   const fetchStats = async () => {
     try {
@@ -32,7 +33,7 @@ export default function App() {
   }, [])
 
   const handleSendCommand = async (cmdText = commandInput) => {
-    if (!cmdText || !cmdText.strip && !cmdText.trim()) return
+    if (!cmdText || !cmdText.trim()) return
 
     const textToSubmit = cmdText.trim()
     setCommandInput('')
@@ -62,8 +63,54 @@ export default function App() {
   }
 
   const handleVoiceListen = async () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+
+    if (SpeechRecognition) {
+      try {
+        if (recognitionRef.current) {
+          recognitionRef.current.abort()
+        }
+
+        const recognition = new SpeechRecognition()
+        recognitionRef.current = recognition
+        recognition.continuous = false
+        recognition.interimResults = false
+        recognition.lang = 'en-US'
+
+        setReactorState('listening')
+        setStatusText('LISTENING TO AUDIO BUS...')
+        setLogs(prev => [...prev, { type: 'system', text: 'Microphone active. Speak your command now...' }])
+
+        recognition.onresult = (event) => {
+          const transcript = event.results[0][0].transcript
+          setLogs(prev => [...prev, { type: 'system', text: `Voice Detected: "${transcript}"` }])
+          handleSendCommand(transcript)
+        }
+
+        recognition.onerror = (event) => {
+          console.warn('Speech recognition status:', event.error)
+          if (event.error !== 'no-speech') {
+            setLogs(prev => [...prev, { type: 'system', text: `Voice status: ${event.error}` }])
+          }
+          setReactorState('idle')
+          setStatusText('JARVIS ONLINE')
+        }
+
+        recognition.onend = () => {
+          setReactorState('idle')
+          setStatusText('JARVIS ONLINE')
+        }
+
+        recognition.start()
+        return
+      } catch (err) {
+        console.warn('Browser SpeechRecognition error, falling back to backend:', err)
+      }
+    }
+
+    // Fallback: Backend Python speech listener
     setReactorState('listening')
-    setStatusText('LISTENING FOR VOICE INPUT...')
+    setStatusText('LISTENING FOR VOICE INPUT (BACKEND)...')
     setLogs(prev => [...prev, { type: 'system', text: 'Microphone active. Speak now...' }])
 
     try {
