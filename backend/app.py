@@ -3,6 +3,8 @@ from flask_cors import CORS
 import time
 import os
 import sys
+import tempfile
+import uuid
 
 from config import Config
 from core.llm import JARVISEngine
@@ -60,9 +62,67 @@ def handle_command():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/api/voice-audio', methods=['POST'])
+def handle_voice_audio():
+    """Process uploaded microphone WAV audio recording directly from browser."""
+    if 'audio' not in request.files:
+        return jsonify({"status": "error", "message": "No audio file attached"}), 400
+
+    audio_file = request.files['audio']
+    should_speak = request.form.get('speak', 'true').lower() == 'true'
+
+    temp_path = os.path.join(tempfile.gettempdir(), f"jarvis_voice_{uuid.uuid4().hex}.wav")
+    audio_file.save(temp_path)
+
+    try:
+        import speech_recognition as sr
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(temp_path) as source:
+            recognizer.adjust_for_ambient_noise(source, duration=0.3)
+            audio_data = recognizer.record(source)
+            text = recognizer.recognize_google(audio_data)
+
+        if not text or not text.strip():
+            return jsonify({
+                "status": "warning",
+                "message": "Speech was too quiet or could not be recognized. Please try speaking closer to the microphone.",
+                "heard_text": ""
+            })
+
+        result = jarvis_engine.process_command(text)
+
+        if should_speak and result.get('response'):
+            voice_engine.speak(result['response'])
+
+        return jsonify({
+            "status": "success",
+            "heard_text": text,
+            "data": result
+        })
+    except sr.UnknownValueError:
+        return jsonify({
+            "status": "warning",
+            "message": "Could not understand audio clearly. Please try speaking again.",
+            "heard_text": ""
+        })
+    except sr.RequestError as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Speech recognition service error: {str(e)}",
+            "heard_text": ""
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
 @app.route('/api/voice-listen', methods=['POST'])
 def voice_listen():
-    """Trigger microphone listening and speech recognition."""
+    """Trigger server-side microphone listening if PyAudio is present."""
     try:
         listen_res = voice_engine.listen()
         if not listen_res.get('success'):

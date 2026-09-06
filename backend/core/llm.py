@@ -33,12 +33,19 @@ class JARVISEngine:
             if loc and len(loc) > 2 and loc not in ['the', 'current', 'local', 'today']:
                 return loc
 
-        # Default to empty string (which prompts wttr.in to use user's geolocation)
         return ""
 
     def parse_intent(self, text):
         """Rule-based natural language understanding for rapid system automation."""
         text_lower = text.lower().strip()
+
+        # Media Playback & Video/Music Queries (e.g., "play Samay Rahana videos on YouTube", "play believer", "play music", "play")
+        if re.search(r'\b(play|stream|listen to|watch)\b', text_lower) or ('youtube' in text_lower and any(w in text_lower for w in ['search', 'find', 'show', 'open', 'run', 'video'])):
+            return 'play_media', text
+
+        # Wikipedia / Knowledge Lookup (e.g., "who is elon musk", "what is quantum computing", "tell me about iron man")
+        if re.search(r'\b(who is|what is|tell me about|explain|search wikipedia for|wiki)\b', text_lower) and not re.search(r'\b(time|date|weather|temperature)\b', text_lower):
+            return 'search_wikipedia', text
 
         # Weather Detection & Location Extraction
         if re.search(r'\b(weather|temperature|forecast|rain|climate)\b', text_lower):
@@ -56,7 +63,6 @@ class JARVISEngine:
         # App Launching
         if re.search(r'\b(open|launch|start|run)\b', text_lower):
             app_target = re.sub(r'^(open|launch|start|run)\s+', '', text_lower).strip()
-            # Clean pleasantries
             app_target = re.sub(r'\b(please|for me|now|app|application)\b', '', app_target).strip()
             return 'launch_app', app_target
 
@@ -89,7 +95,7 @@ class JARVISEngine:
             if action_result:
                 return {
                     "transcript": user_text,
-                    "response": f"Executing command: {action_result}",
+                    "response": f"Executing directive: {action_result}",
                     "intent": intent,
                     "action_executed": True,
                     "action_details": action_result
@@ -120,7 +126,7 @@ class JARVISEngine:
         elif "stark" in prompt_lower or "iron man" in prompt_lower:
             return "I am currently monitoring all HUD protocols and energy distribution grids, Sir."
         elif "help" in prompt_lower or "capabilities" in prompt_lower or "what can you do" in prompt_lower:
-            return "I can monitor system stats (CPU, RAM, Battery), launch apps (Chrome, VS Code, Calculator, Notepad, CMD), adjust volume, check global weather, search Google, and answer questions."
+            return "I can play videos & music on YouTube/Spotify, monitor system telemetry (CPU, RAM, Battery), launch apps, adjust volume, fetch Wikipedia summaries, check global weather, and search Google."
 
         # Default intelligent response generator
-        return f"Understood, Sir. I have processed your input regarding '{prompt}'. All protocols remain optimal."
+        return f"Understood, Sir. Processing directive regarding '{prompt}'. All protocols remain optimal."

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Mic, MicOff, Send, Cpu, Volume2, ShieldCheck, Zap } from 'lucide-react'
+import { Mic, MicOff, Send, Cpu, Volume2, ShieldCheck, Zap, Radio } from 'lucide-react'
 import ArcReactor from './components/ArcReactor'
 import Terminal from './components/Terminal'
 import SystemStats from './components/SystemStats'
 import QuickActions from './components/QuickActions'
 import { jarvisApi } from './utils/api'
+import { WavRecorder } from './utils/wavRecorder'
 
 export default function App() {
   const [commandInput, setCommandInput] = useState('')
@@ -15,7 +16,10 @@ export default function App() {
   ])
   const [systemStats, setSystemStats] = useState(null)
   const [voiceEnabled, setVoiceEnabled] = useState(true)
-  const recognitionRef = useRef(null)
+  const [isRecording, setIsRecording] = useState(false)
+
+  const recorderRef = useRef(null)
+  const autoStopTimerRef = useRef(null)
 
   const fetchStats = async () => {
     try {
@@ -64,68 +68,87 @@ export default function App() {
     }
   }
 
-  const handleVoiceListen = async () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+  const stopAndProcessRecording = async () => {
+    if (autoStopTimerRef.current) {
+      clearTimeout(autoStopTimerRef.current)
+      autoStopTimerRef.current = null
+    }
 
-    if (!SpeechRecognition) {
-      setLogs(prev => [...prev, { type: 'system', text: 'Browser Speech API not supported. Please use Chrome, Edge, or type commands.' }])
+    if (!recorderRef.current || !isRecording) return
+
+    setIsRecording(false)
+    setReactorState('speaking')
+    setStatusText('TRANSCRIBING AUDIO BUS...')
+    setLogs(prev => [...prev, { type: 'system', text: 'Transcribing voice buffer...' }])
+
+    try {
+      const wavBlob = await recorderRef.current.stop()
+      recorderRef.current = null
+
+      if (!wavBlob) {
+        setLogs(prev => [...prev, { type: 'system', text: 'No audio captured.' }])
+        setReactorState('idle')
+        setStatusText('JARVIS ONLINE')
+        return
+      }
+
+      const res = await jarvisApi.sendVoiceAudio(wavBlob, voiceEnabled)
+
+      if (res.data?.heard_text) {
+        setLogs(prev => [...prev, { type: 'user', text: res.data.heard_text }])
+        if (res.data?.data?.response) {
+          setLogs(prev => [...prev, { type: 'jarvis', text: res.data.data.response }])
+        }
+        if (res.data?.data?.action_executed) {
+          setLogs(prev => [...prev, { type: 'system', text: `Action Executed: ${res.data.data.action_details}` }])
+        }
+      } else {
+        setLogs(prev => [
+          ...prev,
+          { type: 'system', text: res.data?.message || 'Could not understand audio. Please try speaking clearly.' }
+        ])
+      }
+    } catch (err) {
+      console.error('Voice transcription error:', err)
+      setLogs(prev => [...prev, { type: 'system', text: 'Audio transcription error or server unreachable.' }])
+    } finally {
+      setTimeout(() => {
+        setReactorState('idle')
+        setStatusText('JARVIS ONLINE')
+      }, 1200)
+    }
+  }
+
+  const handleToggleVoice = async () => {
+    if (isRecording) {
+      await stopAndProcessRecording()
       return
     }
 
     try {
-      // First request microphone permission explicitly
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        try {
-          await navigator.mediaDevices.getUserMedia({ audio: true })
-        } catch (permErr) {
-          setLogs(prev => [...prev, { type: 'system', text: 'Microphone access denied. Please allow microphone in your browser URL bar.' }])
-          return
-        }
-      }
+      const recorder = new WavRecorder()
+      recorderRef.current = recorder
+      await recorder.start()
 
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort() } catch (e) {}
-      }
-
-      const recognition = new SpeechRecognition()
-      recognitionRef.current = recognition
-      recognition.continuous = false
-      recognition.interimResults = false
-      recognition.lang = 'en-US'
-
+      setIsRecording(true)
       setReactorState('listening')
-      setStatusText('LISTENING TO AUDIO BUS...')
-      setLogs(prev => [...prev, { type: 'system', text: 'Microphone active. Speak your command now...' }])
+      setStatusText('RECORDING MICROPHONE BUFFER...')
+      setLogs(prev => [
+        ...prev,
+        { type: 'system', text: '🎙️ Microphone listening. Speak your command now...' }
+      ])
 
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript
-        setLogs(prev => [...prev, { type: 'system', text: `Voice Heard: "${transcript}"` }])
-        handleSendCommand(transcript)
-      }
-
-      recognition.onerror = (event) => {
-        console.warn('Speech recognition status:', event.error)
-        if (event.error === 'network') {
-          setLogs(prev => [
-            ...prev,
-            { type: 'system', text: 'Voice network note: Google speech recognition service was unreachable. You can also type directly in the HUD input prompt below.' }
-          ])
-        } else if (event.error !== 'no-speech') {
-          setLogs(prev => [...prev, { type: 'system', text: `Voice status: ${event.error}` }])
-        }
-        setReactorState('idle')
-        setStatusText('JARVIS ONLINE')
-      }
-
-      recognition.onend = () => {
-        setReactorState('idle')
-        setStatusText('JARVIS ONLINE')
-      }
-
-      recognition.start()
+      // Auto-stop after 4 seconds of speech
+      autoStopTimerRef.current = setTimeout(() => {
+        stopAndProcessRecording()
+      }, 4200)
     } catch (err) {
-      console.warn('Recognition start exception:', err)
-      setLogs(prev => [...prev, { type: 'system', text: 'Could not start voice recognition. Please use the text input.' }])
+      console.error('Microphone capture error:', err)
+      setLogs(prev => [
+        ...prev,
+        { type: 'system', text: 'Microphone access denied. Please click the camera/mic icon in your browser URL bar to allow microphone access.' }
+      ])
+      setIsRecording(false)
       setReactorState('idle')
       setStatusText('JARVIS ONLINE')
     }
@@ -168,11 +191,15 @@ export default function App() {
 
           <div style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
             <button
-              className={`btn-mic ${reactorState === 'listening' ? 'listening' : ''}`}
-              onClick={handleVoiceListen}
+              className={`btn-mic ${isRecording ? 'listening' : ''}`}
+              onClick={handleToggleVoice}
+              style={{
+                background: isRecording ? 'rgba(239, 68, 68, 0.25)' : undefined,
+                borderColor: isRecording ? '#ef4444' : undefined
+              }}
             >
-              <Mic size={18} style={{ marginRight: '8px', verticalAlign: 'middle' }} />
-              {reactorState === 'listening' ? 'Listening to Mic...' : 'Activate Voice Command'}
+              <Mic size={18} style={{ marginRight: '8px', verticalAlign: 'middle', animation: isRecording ? 'pulse 1s infinite' : 'none' }} />
+              {isRecording ? '🔴 Recording... Click to Process' : '🎙️ Activate Voice Command'}
             </button>
 
             <form
